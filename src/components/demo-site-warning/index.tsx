@@ -3,7 +3,7 @@ import { faHammerBrush } from "@fortawesome/sharp-regular-svg-icons";
 
 import AriaLink from "~/components/aria-link";
 
-export default function DemoSiteWarning() {
+export default function Index() {
   return (
     <div className="mb-16 mt-32 grid place-content-center p-12 lg:p-4">
       <div className="flex max-w-prose flex-col items-center gap-4 lg:gap-8">

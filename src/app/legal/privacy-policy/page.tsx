@@ -1,7 +1,7 @@
-import DemoSiteWarning from "~/components/demo-site-warning";
+import Index from "~/components/demo-site-warning";
 
 export const metadata = {
   title: "Privacy Policy",
 };
 
-export default DemoSiteWarning;
+export default Index;

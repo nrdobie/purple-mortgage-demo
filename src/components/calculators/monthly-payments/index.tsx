@@ -1,49 +1,88 @@
 "use client";
 
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faCheck, faChevronDown } from "@fortawesome/sharp-regular-svg-icons";
-import { Listbox, Transition } from "@headlessui/react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { defaultsDeep } from "lodash";
-import { Fragment, useMemo } from "react";
-import { Controller, DeepPartial, FormProvider, useForm, useWatch } from "react-hook-form";
+import { useEffect, useMemo } from "react";
+import { DeepPartial, FormProvider, useForm, useFormContext, useWatch } from "react-hook-form";
 import { useHookFormMask } from "use-mask-input";
-import { z } from "zod";
+
+import monthlyPaymentsSchema, {
+  MonthlyPaymentsFormValues,
+} from "~/components/calculators/monthly-payments/monthly-payments-schema";
+import termsOptions from "~/components/calculators/monthly-payments/terms-options";
+import Select from "~/components/select";
 
 import useIntlNumberFormat from "~/hooks/use-intl-number-format";
 
+import rates, { LoanTerm } from "~/data/rates";
 import calculateMonthlyPayments from "~/utils/calculate-montly-payments";
 
-const schema = z.object({
-  principal: z.number({ coerce: true }).min(1, "Principal must be greater than $1"),
-  interestRate: z.number({ coerce: true }).gt(0, "Interest rate must be greater than 0%"),
-  years: z.number({ coerce: true }).min(1, "Must have be at least 1 year").int(),
-});
-
-type FormValues = z.infer<typeof schema>;
-
 export type MonthlyPaymentsCalculatorProps = {
-  initialValues?: DeepPartial<FormValues>;
+  initialValues?: DeepPartial<MonthlyPaymentsFormValues>;
 };
 
-const DEFAULT_INITIAL_VALUES: DeepPartial<FormValues> = {
+const DEFAULT_INITIAL_VALUES: DeepPartial<MonthlyPaymentsFormValues> = {
   principal: 0,
-  interestRate: 6.375,
-  years: 30,
+  interestRate: (rates.get(LoanTerm.FIXED_30)?.interestRate ?? 0) * 100,
+  terms: LoanTerm.FIXED_30,
 };
-
-const YEARS_OPTIONS = [
-  { label: "15 Years Fixed", value: 15 },
-  { label: "30 Years Fixed", value: 30 },
-];
 
 export default function MonthlyPaymentsCalculator(props: MonthlyPaymentsCalculatorProps) {
-  const formMethods = useForm<FormValues>({
-    resolver: zodResolver(schema),
+  const formMethods = useForm<MonthlyPaymentsFormValues>({
+    resolver: zodResolver(monthlyPaymentsSchema),
     defaultValues: defaultsDeep({}, props.initialValues, DEFAULT_INITIAL_VALUES),
+    resetOptions: {
+      keepDirty: true,
+      keepDirtyValues: true,
+    },
   });
-  const { register, control } = formMethods;
+  const { register, resetField, control, getValues, setValue, formState } = formMethods;
   const registerWithMask = useHookFormMask(register);
+
+  const principal = useWatch({ control, name: "principal" });
+
+  useEffect(() => {
+    if (formState.dirtyFields.terms) {
+      return;
+    }
+
+    const terms = getValues("terms");
+
+    const isJumbo = principal >= 766_550;
+
+    let nextTerms: LoanTerm;
+    switch (terms) {
+      case LoanTerm.FIXED_15:
+      case LoanTerm.JUMBO_FIXED_15:
+        nextTerms = isJumbo ? LoanTerm.JUMBO_FIXED_15 : LoanTerm.FIXED_15;
+        break;
+      case LoanTerm.FIXED_30:
+      case LoanTerm.JUMBO_FIXED_30:
+        nextTerms = isJumbo ? LoanTerm.JUMBO_FIXED_30 : LoanTerm.FIXED_30;
+        break;
+      default:
+        nextTerms = LoanTerm.FIXED_30;
+    }
+
+    if (nextTerms === terms) {
+      return;
+    }
+
+    setValue("terms", nextTerms, { shouldDirty: false });
+  }, [setValue, getValues, principal, formState.dirtyFields.terms]);
+
+  const terms = useWatch({ control, name: "terms" });
+
+  useEffect(() => {
+    if (formState.dirtyFields.interestRate) {
+      return;
+    }
+    const interestRate = rates.get(terms)?.interestRate;
+
+    if (interestRate) {
+      setValue("interestRate", interestRate * 100, { shouldDirty: false });
+    }
+  }, [formState.dirtyFields.interestRate, setValue, terms]);
 
   return (
     <FormProvider {...formMethods}>
@@ -60,16 +99,16 @@ export default function MonthlyPaymentsCalculator(props: MonthlyPaymentsCalculat
             >
               <span className="label-text">Borrow Amount</span>
             </label>
-            <input
-              {...registerWithMask("principal", "currency", {
-                digits: 0,
-                autoUnmask: true,
-                valueAsNumber: true,
-                rightAlign: false,
-              })}
-              className="input input-bordered"
-              id="monthly-payment-calculator-principal"
-            />
+            <div className="join">
+              <div className="join-item grid aspect-square w-12 shrink-0 place-content-center border border-base-content/20 bg-base-200 text-lg font-semibold">
+                $
+              </div>
+              <input
+                {...register("principal", { valueAsNumber: true })}
+                className="input join-item input-bordered w-full"
+                id="monthly-payment-calculator-principal"
+              />
+            </div>
           </div>
 
           <div className="form-control">
@@ -79,79 +118,43 @@ export default function MonthlyPaymentsCalculator(props: MonthlyPaymentsCalculat
             >
               <span className="label-text">Interest Rate</span>
             </label>
-            <input
-              {...registerWithMask("interestRate", "percentage", {
-                inputType: "number",
-                digits: 3,
-                autoUnmask: true,
-                valueAsNumber: true,
-                rightAlign: false,
-              })}
-              className="input input-bordered"
-              id="monthly-payment-calculator-interest-rate"
-            />
+            <div className="join">
+              <input
+                {...register("interestRate", { valueAsNumber: true })}
+                className="input join-item input-bordered w-full flex-1 text-right"
+                id="monthly-payment-calculator-interest-rate"
+              />
+              <div className="join-item grid aspect-square w-12 shrink-0 place-content-center border border-base-content/20 bg-base-200 text-lg font-semibold">
+                %
+              </div>
+            </div>
           </div>
 
-          <Controller
+          <Select
+            name="terms"
             control={control}
-            name="years"
-            render={({ field }) => (
-              <Listbox
-                {...field}
-                as="div"
-                className="form-control relative"
-              >
-                <Listbox.Label className="label">
-                  <span className="label-text">Years</span>
-                </Listbox.Label>
-                <Listbox.Button className="input input-bordered flex items-center justify-between">
-                  <span>{YEARS_OPTIONS.find((option) => option.value === field.value)?.label ?? "Select Years"}</span>
-                  <FontAwesomeIcon
-                    icon={faChevronDown}
-                    className="opacity-50"
-                  />
-                </Listbox.Button>
-                <Transition
-                  as={Fragment}
-                  enter="transition ease-out duration-200"
-                  enterFrom="opacity-0"
-                  enterTo="opacity-100"
-                  leave="transition ease-in duration-200"
-                  leaveFrom="opacity-100"
-                  leaveTo="opacity-0"
-                >
-                  <Listbox.Options className="absolute top-full z-10 mt-1 max-h-60 w-full overflow-auto rounded-btn border border-base-content/10 bg-base-100 shadow">
-                    {YEARS_OPTIONS.map((option) => (
-                      <Listbox.Option
-                        key={option.value}
-                        value={option.value}
-                        className="flex cursor-pointer items-center gap-2 p-4 transition-colors ui-active:bg-primary/40 lg:py-2"
-                      >
-                        <figure className="grid aspect-square w-4 place-content-center">
-                          {field.value === option.value ? <FontAwesomeIcon icon={faCheck} /> : null}
-                        </figure>
-                        <span>{option.label}</span>
-                      </Listbox.Option>
-                    ))}
-                  </Listbox.Options>
-                </Transition>
-              </Listbox>
-            )}
+            label="Years"
+            options={termsOptions}
+            placeholder="Select a term"
           />
+
           <div className="col-span-full justify-self-end">
             <Calculation />
           </div>
         </form>
       </div>
-      <div></div>
     </FormProvider>
   );
 }
 
 export function Calculation() {
-  const [principal, interestRate, years] = useWatch<FormValues>({
-    name: ["principal", "interestRate", "years"],
+  const { control } = useFormContext<MonthlyPaymentsFormValues>();
+  const [principal, interestRate, terms] = useWatch({
+    control,
+    name: ["principal", "interestRate", "terms"],
   });
+
+  const years = terms === LoanTerm.FIXED_15 || terms === LoanTerm.JUMBO_FIXED_15 ? 15 : 30;
 
   const formatter = useIntlNumberFormat("en-US", { style: "currency", currency: "USD" });
 
